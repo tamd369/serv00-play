@@ -26,10 +26,10 @@ fi
 PS3="请选择(输入0退出): "
 install() {
   cd ${installpath}
-  if [ -d serv00-play ]; then
+  if [ -d "serv00-play" ]; then
     cd "serv00-play"
     git stash
-    if git pull; then
+    if git pull origin main; then
       echo "更新完毕"
       #重新给各个脚本赋权限
       chmod +x ./start.sh
@@ -38,6 +38,7 @@ install() {
       chmod +x ./wxsend.sh
       chmod +x ${installpath}/serv00-play/singbox/start.sh
       chmod +x ${installpath}/serv00-play/singbox/killsing-box.sh
+      chmod +x ${installpath}/serv00-play/singbox/autoUpdateHyIP.sh
       chmod +x ${installpath}/serv00-play/ssl/cronSSL.sh
       red "请重新启动脚本!"
       exit 0
@@ -66,6 +67,7 @@ install() {
   chmod +x ./wxsend.sh
   chmod +x ${installpath}/serv00-play/singbox/start.sh
   chmod +x ${installpath}/serv00-play/singbox/killsing-box.sh
+  chmod +x ${installpath}/serv00-play/singbox/autoUpdateHyIP.sh
   chmod +x ${installpath}/serv00-play/ssl/cronSSL.sh
   read -p "$(yellow 设置完毕,需要重新登录才能生效，是否重新登录？[y/n] [y]:)" input
   input=${input:-y}
@@ -93,7 +95,7 @@ showSingBoxInfo() {
 }
 
 chooseSingbox() {
-  echo "保活sing-box中哪个项目: "
+  echo "保活sing-box中哪个项目(单选): "
   echo " 1.hy2/vmess+ws/socks5 "
   echo " 2.argo+vmess "
   echo " 3.all "
@@ -181,7 +183,7 @@ createConfigFile() {
       item+=("webssh")
       ;;
     88)
-      delCron
+      #delCron
       backupConfig "config.json"
       green "设置完毕!"
       return 0
@@ -215,20 +217,6 @@ createConfigFile() {
   json_content="${json_content%,}\n"
   json_content+="   ],\n"
 
-  if [ "$num" = "4" ]; then
-    json_content+="   \"chktime\": \"null\""
-    json_content+="}\n"
-    printf "$json_content" >./config.json
-    echo -e "${YELLOW} 设置完成! ${RESET} "
-    delCron
-    return
-  fi
-
-  read -p "配置保活检查的时间间隔(单位分钟，默认5分钟):" tm
-  tm=${tm:-"5"}
-
-  json_content+="   \"chktime\": \"$tm\","
-
   read -p "是否需要配置消息推送? [y/n] [n]:" input
   input=${input:-n}
 
@@ -256,12 +244,24 @@ createConfigFile() {
   else
     sendtype=${sendtype:-"null"}
   fi
+
+  read -p "是否使用cron保活? [y/n] [n]:" setcron
+  setcron=${setcron:-n}
+
+  if [[ "$setcron" == "y" ]]; then
+    read -p "配置保活检查的时间间隔(单位分钟[1~59]，默认5分钟):" tm
+    tm=${tm:-"5"}
+    json_content+="   \"chktime\": \"$tm\","
+  fi
   json_content+="\n \"sendtype\": $sendtype \n"
   json_content+="}\n"
 
   # 使用 printf 生成文件
   printf "$json_content" >./config.json
-  addCron $tm
+  if [[ "$setcron" == "y" ]]; then
+    addCron $tm
+  fi
+
   chmod +x ${installpath}/serv00-play/keepalive.sh
   echo -e "${YELLOW} 设置完成! ${RESET} "
 
@@ -917,55 +917,12 @@ EOF
 }
 
 startSingBox() {
-  cd ${installpath}/serv00-play/singbox
-
-  if [[ ! -e "singbox.json" ]]; then
-    red "请先进行配置!"
-    return 1
-  fi
-
-  # if [[ ! -e ${installpath}/serv00-play/singbox/serv00sb ]] || [[ ! -e ${installpath}/serv00-play/singbox/cloudflared ]]; then
-  #   read -p "请输入使用密码:" password
-  # fi
-
-  if ! checkDownload "serv00sb"; then
-    return
-  fi
-  if ! checkDownload "cloudflared"; then
-    return
-  fi
-
-  if checkSingboxAlive; then
-    red "sing-box 已在运行，请勿重复操作!"
-    return 1
-  else #启动可能需要cloudflare，此处表示cloudflare和sb有一个不在线，所以干脆先杀掉再重启。
-    chmod 755 ./killsing-box.sh
-    ./killsing-box.sh
-  fi
-
-  if chmod +x start.sh && ! ./start.sh; then
-    red "sing-box启动失败！"
-    exit 1
-  fi
-  sleep 1
-  if checkProcAlive "serv00sb"; then
-    yellow "启动成功!"
-  else
-    red "启动失败!"
-  fi
+  start_sing_box
 
 }
 
 stopSingBox() {
-  cd ${installpath}/serv00-play/singbox
-  if [ -f killsing-box.sh ]; then
-    chmod 755 ./killsing-box.sh
-    ./killsing-box.sh
-  else
-    echo "请先安装serv00-play!!!"
-    return
-  fi
-  echo "已停掉sing-box!"
+  stop_sing_box
 }
 
 killUserProc() {
@@ -1143,6 +1100,9 @@ InitServer() {
       rm -rf ~/* 2>/dev/null
     else
       rm -rf ~/* ~/.* 2>/dev/null
+      clean_all_domains
+      clean_all_dns
+      create_default_domain
     fi
     cleanPort
     yellow "初始化完毕"
@@ -1866,15 +1826,15 @@ delPortMenu() {
 
   if [[ ${#indexPorts[@]} -gt 0 ]]; then
     printIndexPorts
-    read -p "请选择要删除的端口记录编号(输入0删除所有端口记录, 回车返回):" number
+    read -p "请选择要删除的端口记录编号(输入-1删除所有端口记录, 回车返回):" number
     number=${number:-99}
 
     if [[ $number -eq 99 ]]; then
       return
-    elif [[ $number -gt 3 || $number -lt 0 ]]; then
+    elif [[ $number -gt 3 || $number -lt -1 || $number -eq 0 ]]; then
       echo "非法输入!"
       return
-    elif [[ $number -eq 0 ]]; then
+    elif [[ $number -eq -1 ]]; then
       cleanPort
     else
       idx=$((number - 1))
@@ -1906,12 +1866,29 @@ addPortMenu() {
   fi
   loadPort
   read -p "请输入端口备注(如hy2，vmess，用于脚本自动获取端口):" opts
-  local port=$(getPort $type $opts)
-  if [[ "$port" == "failed" ]]; then
-    red "分配端口失败,请重新操作!"
+  read -p "是否自动分配端口? [y/n] [y]:" input
+  input=${input:-y}
+  if [[ "$input" == "y" ]]; then
+    port=$(getPort $type $opts)
+    if [[ "$port" == "failed" ]]; then
+      red "分配端口失败,请重新操作!"
+    else
+      green "分配出来的端口是:$port"
+    fi
   else
-    green "分配出来的端口是:$port"
+    read -p "请输入端口号:" port
+    if [[ -z "$port" ]]; then
+      red "端口不能为空"
+      return 1
+    fi
+    resp=$(devil port add $type $port $opts)
+    if [[ "$resp" =~ .*succesfully.*$ || "$resp" =~ .*Ok.*$ ]]; then
+      green "添加端口成功!"
+    else
+      red "添加端口失败!"
+    fi
   fi
+
 }
 
 portServ() {
@@ -2237,29 +2214,12 @@ rootServ() {
   showMenu
 }
 
-getUnblockIP() {
-  local hostname=$(hostname)
-  local host_number=$(echo "$hostname" | awk -F'[s.]' '{print $2}')
-  local hosts=("cache${host_number}.serv00.com" "web${host_number}.serv00.com" "$hostname")
-
+showIPStatus() {
   yellow "----------------------------------------------"
   green "  主机名称          |      IP        |  状态"
   yellow "----------------------------------------------"
-  # 遍历主机名称数组
-  for host in "${hosts[@]}"; do
-    # 获取 API 返回的数据
-    local response=$(curl -s "https://ss.botai.us.kg/api/getip?host=$host")
 
-    # 检查返回的结果是否包含 "not found"
-    if [[ "$response" =~ "not found" ]]; then
-      echo "未识别主机${host}, 请联系作者饭奇骏!"
-      return
-    fi
-    local ip=$(echo "$response" | awk -F "|" '{print $1 }')
-    local status=$(echo "$response" | awk -F "|" '{print $2 }')
-    printf "%-20s | %-15s | %-10s\n" "$host" "$ip" "$status"
-  done
-
+  show_ip_status
 }
 
 checkProcStatus() {
@@ -2284,6 +2244,7 @@ sunPanelServ() {
     echo "2. 启动"
     echo "3. 停止"
     echo "4. 初始化密码"
+    echo "5. 导入serv00账号信息(频道会员尊享功能)"
     echo "8. 卸载"
     echo "9. 返回主菜单"
     echo "0. 退出脚本"
@@ -2303,6 +2264,9 @@ sunPanelServ() {
     4)
       resetSunPanelPwd
       ;;
+    5)
+      import_accounts
+      ;;
     8)
       uninstallSunPanel
       ;;
@@ -2318,6 +2282,54 @@ sunPanelServ() {
     esac
   done
   showMenu
+}
+
+import_accounts() {
+  local workdir="${installpath}/serv00-play/sunpanel"
+  if ! vip_statement; then
+    return 1
+  fi
+
+  cd $workdir
+  read -p "请输入会员密码:" passwd
+  if ! checkDownload "importd_panel_accounts.sh" 0 "$passwd" 1; then
+    return 1
+  fi
+
+  chmod +x ./importd_panel_accounts.sh
+
+  ./importd_panel_accounts.sh && rm -rf ./importd_panel_accounts.sh
+
+  if [[ $? -ne 0 ]]; then
+    echo "导入失败!"
+  else
+    echo "导入成功!"
+  fi
+
+}
+
+import_accounts() {
+  local workdir="${installpath}/serv00-play/sunpanel"
+  if ! vip_statement; then
+    return 1
+  fi
+
+  cd $workdir
+  read -s -p "请输入会员密码:" passwd
+  if ! checkDownload "importd_panel_accounts.sh" 0 "$passwd" 1; then
+    return 1
+  fi
+
+  chmod +x ./importd_panel_accounts.sh
+
+  ./importd_panel_accounts.sh && rm -rf ./importd_panel_accounts.sh
+
+  if [[ $? -ne 0 ]]; then
+    echo "导入失败!"
+  else
+    echo "导入成功!"
+  fi
+
 }
 
 uninstallSunPanel() {
@@ -2576,7 +2588,7 @@ installBurnReading() {
   domainPath="$installpath/domains/$domain/public_html"
   cd $domainPath
   echo "正在下载并安装 OneTimeMessagePHP ..."
-  if ! download_from_github_release frankiejun OneTimeMessagePHP OneTimeMessagePHP; then
+  if ! download_from_github_release fkj-src OneTimeMessagePHP OneTimeMessagePHP; then
     red "下载失败!"
     return 1
   fi
@@ -2612,6 +2624,19 @@ uninstallBurnReading() {
   cd $workdir
 
   if ! check_domains_empty; then
+    echo "目前已安装服务的域名有:"
+    print_domains
+    read -p "是否删除所有域名服务? [y/n] [n]:" input
+    input=${input:-n}
+    if [[ "$input" == "y" ]]; then
+      delete_all_domains
+      rm -rf "${installpath}/serv00-play/burnreading"
+    else
+      read -p "请输入要删除的服务的域名:" domain
+      delete_domain "$domain"
+    fi
+  else
+    echo "没有可卸载服务!"
     echo "目前已安装服务的域名有:"
     print_domains
   fi
@@ -2816,36 +2841,313 @@ checkInstalled() {
 }
 
 changeHy2IP() {
+  cd ${installpath}/serv00-play/singbox
+  if [[ ! -e "singbox.json" || ! -e "config.json" ]]; then
+    red "未安装节点，请先安装!"
+    return 1
+  fi
+  showIPStatus
   read -p "是否让程序为HY2选择可用的IP？[y/n] [y]:" input
   input=${input:-y}
 
-  if [[ "$input" == "y" ]]; then
-    cd ${installpath}/serv00-play/singbox
-    if [[ ! -e "singbox.json" || ! -e "config.json" ]]; then
-      red "未安装节点，请先安装!"
+  if [[ "$input" == "n" ]]; then
+    read -p "是否手动选择IP？[y/n] [y]:" choose
+    choose=${choose:-y}
+    if [[ "$choose" == "y" ]]; then
+      read -p "请选择你要的IP的序号:" num
+      if [[ -z "$num" ]]; then
+        red "选择不能为空!"
+        return 1
+      fi
+      if [[ $num -lt 1 || $num -gt ${#localIPs[@]} ]]; then
+        echo "错误：num 的值非法！请输入 1 到 ${#localIPs[@]} 之间的整数。"
+        return 1
+      fi
+      hy2_ip=${localIPs[$((num - 1))]}
+    else
       return 1
     fi
+  else
     hy2_ip=$(get_ip)
-    if [[ -z "hy2_ip" ]]; then
-      red "很遗憾，已无可用IP!"
-      return 1
-    fi
-    if ! upInsertFd singbox.json HY2IP "$hy2_ip"; then
-      red "更新singbox.json配置文件失败!"
-      return 1
-    fi
-
-    if ! upSingboxFd config.json "inbounds" "tag" "hysteria-in" "listen" "$hy2_ip"; then
-      red "更新config.json配置文件失败!"
-      return 1
-    fi
-    green "HY2 更换IP成功，当前IP为 $hy2_ip"
-
-    echo "正在重启sing-box..."
-    stopSingBox
-    startSingBox
   fi
 
+  if [[ -z "$hy2_ip" ]]; then
+    red "很遗憾，已无可用IP!"
+    return 1
+  fi
+  if ! upInsertFd singbox.json HY2IP "$hy2_ip"; then
+    red "更新singbox.json配置文件失败!"
+    return 1
+  fi
+
+  if ! upSingboxFd config.json "inbounds" "tag" "hysteria-in" "listen" "$hy2_ip"; then
+    red "更新config.json配置文件失败!"
+    return 1
+  fi
+  green "HY2 更换IP成功，当前IP为 $hy2_ip"
+
+  echo "正在重启sing-box..."
+  stopSingBox
+  startSingBox
+
+}
+
+linkAliveServ() {
+  workdir="${installpath}/serv00-play/linkalive"
+  if ! checkInstalled "serv00-play"; then
+    return 1
+  fi
+  if ! vip_statement "linkAliveStatment"; then
+    return 1
+  fi
+
+  if [[ ! -e $workdir ]]; then
+    mkdir -p $workdir
+  fi
+  cd $workdir
+
+  read -s -p "请输入会员密码:" passwd
+  #判断密码是否为空
+  if [[ -z "$passwd" ]]; then
+    red "密码不能为空!"
+    return 1
+  fi
+  if ! checkDownload "linkAlive.sh" $ISFILE "$passwd" $ISVIP; then
+    return 1
+  fi
+
+  chmod +x ./linkAlive.sh
+  ./linkAlive.sh "$passwd"
+
+  #showMenu
+}
+
+keepAliveServ() {
+  if ! checkInstalled "serv00-play"; then
+    return 1
+  fi
+  while true; do
+    yellow "---------------------"
+    echo "keepAlive:"
+    echo "1. 安装"
+    echo "2. 更新(须先按1更新serv00-play)"
+    echo "3. 更新保活时间间隔"
+    echo "4. 修改token"
+    echo "8. 卸载"
+    echo "9. 返回主菜单"
+    echo "0. 退出脚本"
+    yellow "---------------------"
+    read -p "请选择:" input
+
+    case $input in
+    1)
+      installkeepAlive
+      ;;
+    2)
+      updatekeepAlive
+      ;;
+    3)
+      setKeepAliveInterval
+      ;;
+    4)
+      changeKeepAliveToken
+      ;;
+    8)
+      uninstallkeepAlive
+      ;;
+    9)
+      break
+      ;;
+    0)
+      exit 0
+      ;;
+    *)
+      echo "无效选项，请重试"
+      ;;
+    esac
+  done
+
+  showMenu
+}
+
+user="$(whoami)"
+domain="$user.serv00.net"
+domain="${domain,,}"
+domainPath="${installpath}/domains/$domain/public_nodejs"
+installkeepAlive() {
+  local workdir="${installpath}/serv00-play/keepalive"
+  if [[ -e "$domainPath/config.json" ]]; then
+    red "已安装,请勿重复安装!"
+    return 1
+  fi
+  cd $workdir
+
+  read -p "需要使用默认域名[$domain]进行安装，若继续安装将会删除默认域名，确认是否继续? [y/n] [y]:" input
+  input=${input:-y}
+  if [[ "$input" != "y" ]]; then
+    echo "取消安装"
+    return 1
+  fi
+  delDefaultDomain
+  echo "正在安装..."
+  if ! createDefaultDomain; then
+    return 1
+  fi
+  mv "$domainPath/public" "$domainPath/static"
+  cp ./nezha.jpg $domainPath/static
+  cp ./config.json $domainPath
+  cp ./app.js $domainPath
+
+  cd $domainPath
+  if ! npm22 install express body-parser child_process fs; then
+    red "安装依赖失败"
+    return 1
+  fi
+
+  read -p "是否需要自定义token? [y/n] [y]:" input
+  input=${input:-y}
+  if [[ "$input" == "y" ]]; then
+    uuid=""
+    read -p "请输入token:" uuid
+    if [[ -z "$uuid" ]]; then
+      red "token不能为空!"
+      return 1
+    fi
+  else
+    uuid=$(uuidgen)
+  fi
+  green "你的token是:$uuid"
+  sed -i '' "s/uuid/$uuid/g" config.json
+  read -p "输入保活时间间隔(单位:分钟)[默认:2分钟]:" interval
+  interval=${interval:-2}
+  sed -i '' "s/TM/$interval/g" config.json
+
+  green "安装成功"
+
+}
+
+uninstallkeepAlive() {
+  read -p "是否卸载? [y/n] [n]:" input
+  input=${input:-n}
+  if [[ "$input" != "y" ]]; then
+    return 1
+  fi
+  domainPath="${installpath}/domains/$domain/public_nodejs"
+  if ! delDefaultDomain; then
+    return 1
+  fi
+  green "卸载成功"
+}
+
+createDefaultDomain() {
+  rt=$(devil www add $domain nodejs /usr/local/bin/node22 production)
+  if [[ ! "$rt" =~ .*succesfully*$ ]]; then
+    red "创建默认域名失败"
+    return 1
+  fi
+}
+
+delDefaultDomain() {
+  rt=$(devil www del $domain --remove)
+  if [[ ! "$rt" =~ .*deleted*$ ]]; then
+    red "删除默认域名失败"
+    return 1
+  fi
+}
+
+updatekeepAlive() {
+  domainPath="${installpath}/domains/$domain/public_nodejs"
+  workDir="$installpath/serv00-play/keepalive"
+  if [[ ! -e "$domainPath/config.json" ]]; then
+    red "未安装,请先安装!"
+    return 1
+  fi
+  if [[ ! -e "$workDir" ]]; then
+    mkdir -p $workDir
+  fi
+  cd $workDir
+
+  cp ./app.js $domainPath
+
+  cp $workDir/app.js $domainPath
+  devil www restart $domain
+  green "更新成功"
+}
+
+changeKeepAliveToken() {
+  domainPath="${installpath}/domains/$domain/public_nodejs"
+  if [[ ! -e "$domainPath/config.json" ]]; then
+    red "未安装,请先安装!"
+    return 1
+  fi
+
+  cur_token=$(jq -r ".token" $domainPath/config.json)
+  echo "当前token为: $cur_token"
+  token=""
+  read -p "输入新的token:" token
+  if [[ -z "$token" ]]; then
+    red "token不能为空!"
+    return 1
+  fi
+  upInsertFd $domainPath/config.json token $token
+  if [ $? -ne 0 ]; then
+    red "更新失败!"
+    return 1
+  fi
+  green "更新成功"
+}
+
+setKeepAliveInterval() {
+  domainPath="${installpath}/domains/$domain/public_nodejs"
+  if [[ ! -e "$domainPath/config.json" ]]; then
+    red "未安装,请先安装!"
+    return 1
+  fi
+
+  cur_interval=$(jq -r ".interval" $domainPath/config.json)
+  echo "当前保活时间间隔为: $cur_interval 分钟"
+  read -p "输入保活时间间隔(单位:分钟)[默认:2分钟]:" interval
+  interval=${interval:-2}
+  upInsertFd $domainPath/config.json interval $interval
+  if [ $? -ne 0 ]; then
+    red "更新失败!"
+    return 1
+  fi
+  green "更新成功"
+}
+
+linkAliveStatment() {
+  cat <<EOF
+     全新的保活方式，无需借助cron，也不需要第三方平台(github/青龙/vps等登录方式)进行保活。 
+  在使用代理客户端的同时自动保活，全程无感！
+EOF
+}
+
+vip_statement() {
+  statement=$1
+  echo "此功能为会员尊享功能，欢迎加入饭奇骏频道会员: https://www.youtube.com/channel/UCjS3UKSmQ2mvsThXhJIFobA/join  "
+  $statement
+  read -p "你是否会员? [y/n] [n]:" input
+  input=${input:-n}
+
+  if [[ "$input" == "n" ]]; then
+    return 1
+  fi
+
+  return 0
+}
+
+getLatestVer() {
+  ver=$(git ls-remote --tags https://github.com/frankiejun/serv00-play.git | awk -F/ '{print $3}' | sort -V | tail -n 1)
+  echo $ver
+}
+getCurrentVer() {
+  ver=$(git describe --tags --abbrev=0 2>/dev/null)
+  if [ $? -ne 0 ]; then
+    echo null
+  else
+    echo $ver
+  fi
 }
 
 showMenu() {
@@ -2854,12 +3156,13 @@ showMenu() {
   echo -e "${CYAN}${art_wrod}${RESET}"
   echo -e "${GREEN} 饭奇骏频道:https://www.youtube.com/@frankiejun8965 ${RESET}"
   echo -e "${GREEN} TG交流群:https://t.me/fanyousuiqun ${RESET}"
+  echo -e "${GREEN} 当前版本号:$(getCurrentVer) 最新版本号:$(getLatestVer) ${RESET}"
   echo "<------------------------------------------------------------------>"
   echo "请选择一个选项:"
 
-  options=("安装/更新serv00-play项目" "sun-panel" "webssh" "阅后即焚" "待开发" "设置保活的项目" "配置sing-box"
+  options=("安装/更新serv00-play项目" "sun-panel" "webssh" "阅后即焚" "linkalive" "设置保活的项目" "配置sing-box"
     "运行sing-box" "停止sing-box" "显示sing-box节点信息" "快照恢复" "系统初始化" "前置工作及设置中国时区" "管理哪吒探针" "卸载探针" "设置彩色开机字样" "显示本机IP"
-    "mtproto代理" "alist管理" "端口管理" "域名证书管理" "一键root" "自动检测主机IP状态" "一键更换hy2的IP" "卸载")
+    "mtproto代理" "alist管理" "端口管理" "域名证书管理" "一键root" "自动检测主机IP状态" "一键更换hy2的IP" "KeepAlive" "卸载")
 
   select opt in "${options[@]}"; do
     case $REPLY in
@@ -2876,7 +3179,7 @@ showMenu() {
       burnAfterReadingServ
       ;;
     5)
-      nonServ
+      linkAliveServ
       ;;
     6)
       setConfig
@@ -2930,12 +3233,15 @@ showMenu() {
       rootServ
       ;;
     23)
-      getUnblockIP
+      showIPStatus
       ;;
     24)
       changeHy2IP
       ;;
     25)
+      keepAliveServ
+      ;;
+    26)
       uninstall
       ;;
     0)

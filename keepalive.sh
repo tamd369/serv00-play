@@ -3,6 +3,26 @@
 installpath="$HOME"
 source ${installpath}/serv00-play/utils.sh
 
+LOCKFILE="$installpath/serv00-play/.keepalive.lock"
+
+# 检查是否已经有一个实例在运行
+if [ -e "$LOCKFILE" ]; then
+  echo "另一个实例正在运行，退出..."
+  exit 1
+fi
+
+# 创建锁文件
+touch "$LOCKFILE"
+
+# 定义清理函数
+cleanup() {
+  rm -f "$LOCKFILE"
+  exit
+}
+
+# 捕获脚本退出信号并调用清理函数
+trap cleanup INT TERM EXIT
+
 autoUp=$1
 sendtype=$2
 TELEGRAM_TOKEN="$3"
@@ -10,6 +30,7 @@ TELEGRAM_USERID="$4"
 WXSENDKEY="$5"
 BUTTON_URL="$6"
 PASS="$7"
+autoUpdateHyIP="$8"
 
 #echo "TELEGRAM_TOKEN=$TELEGRAM_TOKEN, TELEGRAM_USERID=$TELEGRAM_USERID,WXSENDKEY=$WXSENDKEY,BUTTON_URL=$BUTTON_URL,pass=$PASS"
 
@@ -42,10 +63,13 @@ checkResetCron() {
   echo "run checkResetCron"
   local msg=""
   cd ${installpath}/serv00-play/
+  tm=$(jq -r ".chktime" config.json)
+  if [ "$tm" == "null" ]; then
+    return
+  fi
   crontab -l | grep keepalive
   if ! crontab -l | grep keepalive; then
     msg="crontab记录被删过,并且已重建。"
-    tm=$(jq -r ".chktime" config.json)
     addCron "$tm"
     sendMsg $msg
   fi
@@ -53,8 +77,9 @@ checkResetCron() {
 
 #构建消息配置文件
 makeMsgConfig() {
-  echo "构造消息配置文件..."
-  cat >msg.json <<EOF
+  if [ -n "$TELEGRAM_TOKEN" ] || [ -n "$WXSENDKEY" ]; then
+    if [[ "$TELEGRAM_TOKEN" != "null" || "$WXSENDKEY" != "null" ]]; then
+      cat >msg.json <<EOF
    {
       "telegram_token": "$TELEGRAM_TOKEN",
       "telegram_userid": "$TELEGRAM_USERID",
@@ -64,6 +89,10 @@ makeMsgConfig() {
       "password": "$PASS"
    }
 EOF
+    fi
+  else
+    echo "TELEGRAM_TOKEN 和 WXSENDKEY 变量均未设置"
+  fi
 }
 
 autoUpdate() {
@@ -121,7 +150,7 @@ startMtg() {
   port=$(jq -r ".port" $config)
   cmd="nohup ./mtg simple-run -n 1.1.1.1 -t 30s -a 1MB 0.0.0.0:$port $secret -c 8192 --prefer-ip=\"prefer-ipv6\" >/dev/null 2>&1 &"
   eval "$cmd"
-  sleep 3
+  sleep 1
   if checkMtgAlive; then
     echo "启动成功"
   else
@@ -142,7 +171,7 @@ startAlist() {
       echo "alist已启动，请勿重复启动!"
     else
       nohup ./alist server >/dev/null 2>&1 &
-      sleep 3
+      sleep 2
       if ! checkProcAlive "alist"; then
         red "启动失败，请检查!"
         return 1
@@ -188,7 +217,7 @@ if [[ -n "$autoUp" ]]; then
 fi
 if [ ! -f config.json ]; then
   echo "未配置保活项目，请先行配置!"
-  exit 0
+  cleanup
 fi
 
 monitor=($(jq -r ".item[]" config.json))
@@ -254,32 +283,32 @@ for obj in "${monitor[@]}"; do
   if [ "$obj" == "sun-panel" ]; then
     if ! checkProcAlive "sun-panel"; then
       startSunPanel
-      sleep 3
+      sleep 2
       if ! checkProcAlive "sun-panel"; then
-        msg="sun-panel restarted failure."
+        msg="sun-panel 重启失败."
       else
-        msg="sun-panel restarted successfully."
+        msg="sun-panel 重启成功."
       fi
     fi
   elif [ "$obj" == "webssh" ]; then
     if ! checkProcAlive "wssh"; then
       startWebSSH
-      sleep 5
+      sleep 2
       if ! checkProcAlive "wssh"; then
-        msg="webssh restarted failure."
+        msg="webssh 重启失败."
       else
-        msg="webssh restarted successfully."
+        msg="webssh 重启成功."
       fi
     fi
   elif [ "$obj" == "vmess" ]; then
     if ! checkvmessAlive; then
       cd ${installpath}/serv00-play/singbox
       chmod +x ./start.sh && ./start.sh 1 keep
-      sleep 5
+      sleep 1
       if ! checkvmessAlive; then
-        msg="vmess restarted failure."
+        msg="vmess 重启失败."
       else
-        msg="vmess restarted successfully."
+        msg="vmess 重启成功."
       fi
     fi
     #hy2和vmess+ws都只需要启动serv00sb，所以可以这么写
@@ -288,53 +317,53 @@ for obj in "${monitor[@]}"; do
       #echo "重启serv00sb中..."
       cd ${installpath}/serv00-play/singbox
       chmod +x ./start.sh && ./start.sh 2 keep
-      sleep 5
+      sleep 1
       if ! checkHy2Alive; then
-        msg="hy2 restarted failure."
+        msg="hy2 重启失败."
       else
-        msg="hy2 restarted successfully."
+        msg="hy2 重启成功."
       fi
     fi
   elif [ "$obj" == "nezha-agent" ]; then
     if ! checknezhaAgentAlive; then
       cd ${installpath}/serv00-play/nezha
       startNeZhaAgent
-      sleep 5
+      sleep 1
       if ! checknezhaAgentAlive; then
-        msg="nezha-agent restarted failure."
+        msg="nezha-agent 重启失败."
       else
-        msg="nezha-agent restarted successfully."
+        msg="nezha-agent 重启成功."
       fi
     fi
   elif [ "$obj" == "mtg" ]; then
     if ! checkMtgAlive; then
       cd ${installpath}/serv00-play/dmtg
       startMtg
-      sleep 5
+      sleep 1
       if ! checkMtgAlive; then
-        msg="mtproto restarted failure."
+        msg="mtproto 重启失败."
       else
-        msg="mtproto restarted successfully."
+        msg="mtproto 重启成功."
       fi
     fi
   elif [ "$obj" == "alist" ]; then
     if ! checkProcAlive "alist"; then
       startAlist
-      sleep 5
+      sleep 1
       if ! checkProcAlive "alist"; then
-        msg="alist restarted failure."
+        msg="alist 重启失败."
       else
-        msg="alist restarted successfully."
+        msg="alist 重启成功."
       fi
     fi
   elif [ "$obj" == "wssh" ]; then
     if ! checkProcAlive wssh; then
       startAlist
-      sleep 5
+      sleep 1
       if ! checkAlistAlive; then
-        msg="alist restarted failure."
+        msg="wssh 重启失败."
       else
-        msg="alist restarted successfully."
+        msg="wssh 重启成功."
       fi
     fi
   else
@@ -348,3 +377,14 @@ done
 if [ ${#monitor[@]} -gt 0 ]; then
   checkResetCron
 fi
+
+if [[ "$autoUpdateHyIP" == "Y" ]]; then
+  echo "正在自动更新HY2IP..."
+  cd ${installpath}/serv00-play/singbox
+  chmod +x ./autoUpdateHyIP.sh && ./autoUpdateHyIP.sh
+fi
+
+devil info account &>/dev/null
+
+# 清理锁文件
+cleanup
