@@ -555,22 +555,9 @@ download_from_net() {
 
   case $app in
   "alist")
-    \# 修改为使用你提供的链接进行下载
-    download_url="https://github.com/ykxVK8yL5L/alist/releases/download/v241230/alist-freebsd.tar.gz"
-    curl -sL -o "alist-freebsd.tar.gz" "$download_url"
-    if [[ ! -e "alist-freebsd.tar.gz" || -n $(file "alist-freebsd.tar.gz" | grep "text") ]]; then
-        echo "下载 alist-freebsd.tar.gz 文件失败!"
-        return 1
-    fi
-    \# 原地解压缩
-    tar -xzf "alist-freebsd.tar.gz"
-    if [[ $? -ne 0 ]]; then
-        echo "解压 alist-freebsd.tar.gz 文件失败!"
-        return 1
-    fi
-    rm -rf "alist-freebsd.tar.gz"
-    echo "下载并解压 alist-freebsd.tar.gz 成功!"
+    download_from_github_release "AlistGo" "alist" "alist-freebsd-amd64.tar.gz"
     ;;
+
   esac
 }
 
@@ -584,21 +571,7 @@ check_update_from_net() {
       echo "未发现新版本!"
       return 1
     fi
-    \# 修改为使用你提供的链接进行下载
-    download_url="https://github.com/ykxVK8yL5L/alist/releases/download/v241230/alist-freebsd.tar.gz"
-    curl -sL -o "alist-freebsd.tar.gz" "$download_url"
-    if [[ ! -e "alist-freebsd.tar.gz" || -n $(file "alist-freebsd.tar.gz" | grep "text") ]]; then
-        echo "下载 alist-freebsd.tar.gz 文件失败!"
-        return 1
-    fi
-    \# 原地解压缩
-    tar -xzf "alist-freebsd.tar.gz"
-    if [[ $? -ne 0 ]]; then
-        echo "解压 alist-freebsd.tar.gz 文件失败!"
-        return 1
-    fi
-    rm -rf "alist-freebsd.tar.gz"
-    echo "下载并解压 alist-freebsd.tar.gz 成功!"
+    download_from_github_release "AlistGo" "alist" "alist-freebsd-amd64.tar.gz"
     ;;
   esac
 }
@@ -621,25 +594,6 @@ download_from_github_release() {
   local user=$1
   local repository=$2
   local zippackage="$3"
-
-  if [ "$repository" = "alist" ]; then
-    # 修改为使用你提供的链接进行下载
-    download_url="https://github.com/ykxVK8yL5L/alist/releases/download/v241230/alist-freebsd.tar.gz"
-    curl -sL -o "alist-freebsd.tar.gz" "$download_url"
-    if [[ ! -e "alist-freebsd.tar.gz" || -n $(file "alist-freebsd.tar.gz" | grep "text") ]]; then
-        echo "下载 alist-freebsd.tar.gz 文件失败!"
-        return 1
-    fi
-    # 原地解压缩
-    tar -xzf "alist-freebsd.tar.gz"
-    if [[ $? -ne 0 ]]; then
-        echo "解压 alist-freebsd.tar.gz 文件失败!"
-        return 1
-    fi
-    rm -rf "alist-freebsd.tar.gz"
-    echo "下载并解压 alist-freebsd.tar.gz 成功!"
-    return 0
-  fi
 
   local url="https://github.com/${user}/${repository}"
   local latestUrl="$url/releases/latest"
