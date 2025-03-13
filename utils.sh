@@ -18,6 +18,7 @@ red() {
   echo -e "${RED}$1${RESET}"
 }
 installpath="$HOME"
+baseurl="https://ss.fkj.pp.ua"
 
 checknezhaAgentAlive() {
   if ps aux | grep nezha-agent | grep -v "grep" >/dev/null; then
@@ -179,15 +180,15 @@ get_webip() {
   local host_number=$(echo "$hostname" | awk -F'[s.]' '{print $2}')
 
   # 构造主机名称的数组
-  local hosts=("web${host_number}.serv00.com" "cache${host_number}.serv00.com")
+  local hosts=("web${host_number}.$(getDoMain)" "cache${host_number}.$(getDoMain)")
 
   # 初始化最终 IP 变量
-  local final_ip=""
+  local final_ip="$(devil vhost list | grep web | awk '{print $1}')"
 
   # 遍历主机名称数组
   for host in "${hosts[@]}"; do
     # 获取 API 返回的数据
-    local response=$(curl -s "https://ss.serv0.us.kg/api/getip?host=$host")
+    local response=$(curl -s "${baseurl}/api/getip?host=$host")
 
     # 检查返回的结果是否包含 "not found"
     if [[ "$response" =~ "not found" ]]; then
@@ -197,7 +198,7 @@ get_webip() {
     # 提取第一个字段作为 IP，并检查第二个字段是否为 "Accessible"
     local ip=$(echo "$response" | awk -F "|" '{ if ($2 == "Accessible") print $1 }')
     # webxx.serv00.com域名对应的ip作为兜底ip
-    if [[ "$host" == "web${host_number}.serv00.com" ]]; then
+    if [[ "$host" == "web${host_number}.$(getDoMain)" ]]; then
       final_ip=$(echo "$response" | awk -F "|" '{print $1}')
     fi
 
@@ -219,15 +220,15 @@ get_ip() {
   local host_number=$(echo "$hostname" | awk -F'[s.]' '{print $2}')
 
   # 构造主机名称的数组
-  local hosts=("cache${host_number}.serv00.com" "web${host_number}.serv00.com" "$hostname")
+  local hosts=("cache${host_number}.$(getDoMain)" "web${host_number}.$(getDoMain)" "$hostname")
 
   # 初始化最终 IP 变量
-  local final_ip=""
+  local final_ip="$(curl -s icanhazip.com)"
 
   # 遍历主机名称数组
   for host in "${hosts[@]}"; do
     # 获取 API 返回的数据
-    local response=$(curl -s "https://ss.serv0.us.kg/api/getip?host=$host")
+    local response=$(curl -s "${baseurl}/api/getip?host=$host")
 
     # 检查返回的结果是否包含 "not found"
     if [[ "$response" =~ "not found" ]]; then
@@ -251,6 +252,30 @@ get_ip() {
 
 isServ00() {
   [[ $(hostname) == *"serv00"* ]]
+}
+
+getDoMain() {
+  if isServ00; then
+    echo -n "serv00.com"
+  else
+    echo -n "hostuno.com"
+  fi
+}
+
+getUserDoMain() {
+  local proc=$1
+  local baseDomain=""
+  user="$(whoami)"
+  if isServ00; then
+    baseDomain="$user.serv00.net"
+  else
+    baseDomain="$user.hostuno.com"
+  fi
+  if [[ -n "$proc" ]]; then
+    echo -n "$proc.$baseDomain"
+  else
+    echo -n "$baseDomain"
+  fi
 }
 
 #获取端口
@@ -525,11 +550,50 @@ delete_all_domains() {
   done
 }
 
+download_from_net() {
+  local app=$1
+
+  case $app in
+  "alist")
+    download_from_github_release "AlistGo" "alist" "alist-freebsd-amd64.tar.gz"
+    ;;
+
+  esac
+}
+
+check_update_from_net() {
+  local app=$1
+
+  case $app in
+  "alist")
+    local current_version=$(./alist version | grep "Version: v" | awk '{print $2}')
+    if ! check_from_github "AlistGo" "alist" "$current_version"; then
+      echo "未发现新版本!"
+      return 1
+    fi
+    download_from_github_release "AlistGo" "alist" "alist-freebsd-amd64.tar.gz"
+    ;;
+  esac
+}
+
+check_from_github() {
+  local user=$1
+  local repository=$2
+  local local_version="$3"
+
+  latest_version=$(curl -sL https://github.com/${user}/${repository}/releases/latest | sed -n 's/.*tag\/\(v[0-9.]*\).*/\1/p' | head -1)
+
+  if [[ "$local_version" != "$latest_version" ]]; then
+    echo "发现新版本: $latest_version，当前版本: $local_version, 正在更新..."
+    return 0
+  fi
+  return 1
+}
+
 download_from_github_release() {
   local user=$1
   local repository=$2
-  local package=$3
-  local zippackage="$package.zip"
+  local zippackage="$3"
 
   local url="https://github.com/${user}/${repository}"
   local latestUrl="$url/releases/latest"
@@ -543,11 +607,33 @@ download_from_github_release() {
     return 1
   fi
   # 原地解压缩
-  unzip -o "$zippackage" -d .
+  case "$zippackage" in
+  *.zip)
+    unzip -o "$zippackage" -d .
+    ;;
+  *.tar.gz | *.tgz)
+    tar -xzf "$zippackage"
+    ;;
+  *.tar.bz2 | *.tbz2)
+    tar -xjf "$zippackage"
+    ;;
+  *.tar.xz | *.txz)
+    tar -xJf "$zippackage"
+    ;;
+  *.tar)
+    tar -xf "$zippackage"
+    ;;
+  *)
+    echo "不支持的文件格式: $zippackage"
+    return 1
+    ;;
+  esac
+
   if [[ $? -ne 0 ]]; then
     echo "解压 $zippackage 文件失败!"
     return 1
   fi
+
   rm -rf "$zippackage"
   echo "下载并解压 $zippackage 成功!"
   return 0
@@ -570,8 +656,7 @@ clean_all_domains() {
 
 create_default_domain() {
   echo "正在创建默认域名..."
-  user="$(whoami)"
-  local domain="${user}.serv00.net"
+  local domain=$(getUserDoMain)
   domain="${domain,,}"
   devil www add $domain php
   echo "默认域名创建成功!"
@@ -597,14 +682,14 @@ show_ip_status() {
   useIPs=()
   local hostname=$(hostname)
   local host_number=$(echo "$hostname" | awk -F'[s.]' '{print $2}')
-  local hosts=("cache${host_number}.serv00.com" "web${host_number}.serv00.com" "$hostname")
+  local hosts=("cache${host_number}.$(getDoMain)" "web${host_number}.$(getDoMain)" "$hostname")
 
   # 遍历主机名称数组
   local i=0
   for host in "${hosts[@]}"; do
     ((i++))
     # 获取 API 返回的数据
-    local response=$(curl -s "https://ss.serv0.us.kg/api/getip?host=$host")
+    local response=$(curl -s "${baseurl}/api/getip?host=$host")
 
     # 检查返回的结果是否包含 "not found"
     if [[ "$response" =~ "not found" ]]; then
