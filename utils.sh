@@ -556,7 +556,7 @@ download_from_net() {
   case $app in
   "alist")
     \# 修改为使用你提供的链接进行下载
-    download_url="https://github.com/ykxVK8yL5L/alist/releases/download/latest/alist-freebsd.tar.gz"
+    download_url="https://github.com/ykxVK8yL5L/alist/releases/download/v241230/alist-freebsd.tar.gz"
     curl -sL -o "alist-freebsd.tar.gz" "$download_url"
     if [[ ! -e "alist-freebsd.tar.gz" || -n $(file "alist-freebsd.tar.gz" | grep "text") ]]; then
         echo "下载 alist-freebsd.tar.gz 文件失败!"
@@ -585,7 +585,7 @@ check_update_from_net() {
       return 1
     fi
     \# 修改为使用你提供的链接进行下载
-    download_url="https://github.com/ykxVK8yL5L/alist/releases/download/latest/alist-freebsd.tar.gz"
+    download_url="https://github.com/ykxVK8yL5L/alist/releases/download/v241230/alist-freebsd.tar.gz"
     curl -sL -o "alist-freebsd.tar.gz" "$download_url"
     if [[ ! -e "alist-freebsd.tar.gz" || -n $(file "alist-freebsd.tar.gz" | grep "text") ]]; then
         echo "下载 alist-freebsd.tar.gz 文件失败!"
@@ -624,7 +624,7 @@ download_from_github_release() {
 
   if [ "$repository" = "alist" ]; then
     # 修改为使用你提供的链接进行下载
-    download_url="https://github.com/ykxVK8yL5L/alist/releases/download/latest/alist-freebsd.tar.gz"
+    download_url="https://github.com/ykxVK8yL5L/alist/releases/download/v241230/alist-freebsd.tar.gz"
     curl -sL -o "alist-freebsd.tar.gz" "$download_url"
     if [[ ! -e "alist-freebsd.tar.gz" || -n $(file "alist-freebsd.tar.gz" | grep "text") ]]; then
         echo "下载 alist-freebsd.tar.gz 文件失败!"
