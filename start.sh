@@ -731,6 +731,7 @@ configSingBox() {
       if [[ -n "$hy2_ip" ]]; then
         green "选中未封ip为 $hy2_ip"
       else
+        hy2_ip=$(curl -s icanhazip.com)
         red "未能找到未封IP,保持默认值！"
       fi
       ;;
@@ -817,6 +818,7 @@ configSingBox() {
       if [[ -n "$hy2_ip" ]]; then
         green "选中未封ip为 $hy2_ip"
       else
+        hy2_ip=$(curl -s icanhazip.com)
         red "未能找到未封IP,保持默认值！"
       fi
       #配置socks5
@@ -1246,6 +1248,7 @@ installNeZhaAgent() {
   if [ ! -e "${workedir}" ]; then
     mkdir -p "${workedir}"
   fi
+
   cd ${workedir}
   if [[ ! -e nezha-agent ]]; then
     echo "正在下载哪吒探针..."
@@ -1623,9 +1626,11 @@ installAlist() {
   else
     cd "alist" || return 1
     if [ ! -e "alist" ]; then
-      if ! download_from_net "alist"; then
+      if ! download_from_github_release "AlistGo" "alist" "alist-freebsd-amd64.tar.gz"; then
         return 1
       fi
+      tar -zxf alist-freebsd-amd64.tar.gz
+      chmod +x ./alist
     fi
   fi
 
@@ -1737,12 +1742,15 @@ resetAdminPass() {
 updateAlist() {
   cd ${installpath}/serv00-play/alist || (echo "未安装alist" && return)
 
-  if ! check_update_from_net "alist"; then
+  local current_version=$(./alist version | grep "Version: v" | awk '{print $2}')
+  if ! check_from_github "AlistGo" "alist" "$current_version"; then
     return 1
   fi
-
   stopAlist
-  download_from_net "alist"
+  if ! download_from_github_release "AlistGo" "alist" "alist-freebsd-amd64.tar.gz"; then
+    return 1
+  fi
+  tar -zxf alist-freebsd-amd64.tar.gz
   chmod +x ./alist
   startAlist
   echo "更新完毕!"
