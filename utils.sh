@@ -550,17 +550,6 @@ delete_all_domains() {
   done
 }
 
-download_from_net() {
-  local app=$1
-
-  case $app in
-  "alist")
-    download_from_github_release "AlistGo" "alist" "alist-freebsd-amd64.tar.gz"
-    ;;
-
-  esac
-}
-
 check_update_from_net() {
   local app=$1
 
